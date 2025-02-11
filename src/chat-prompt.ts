@@ -1,3 +1,6 @@
+import { ApiHandler } from "./api-handler";
+import { EnvType } from "./types";
+
 class MessengerAIChatCompenent extends HTMLElement {
   private input!: HTMLTextAreaElement;
   private display!: HTMLDivElement;
@@ -5,9 +8,16 @@ class MessengerAIChatCompenent extends HTMLElement {
   private isResponding: boolean;
   private abortController: AbortController | null;
   private autoScroll: boolean;
+  private apiHandler: ApiHandler | null;
+  private environment!: EnvType;
+
+  static get observedAttributes() {
+    return ['api-url', 'api-key', 'model']; 
+  }
 
   constructor() {
     super();
+    this.apiHandler = null;
     this.attachShadow({ mode: 'open' });
     if (!this.shadowRoot) {
       console.error('Impossible de créer le composant sans Shadow DOM.');
@@ -27,7 +37,7 @@ class MessengerAIChatCompenent extends HTMLElement {
           <div id="display" class="messenger-ai-chat-area"></div>
           <div class="messenger-ai-input-area">
             <textarea id="input" placeholder="Tapez votre message..."></textarea>
-            <button id="send">Envoyer</button>
+            <button id="send">Send</button>
           </div>
         </div>
       </div>
@@ -35,351 +45,51 @@ class MessengerAIChatCompenent extends HTMLElement {
     this.isResponding = false;
     this.abortController = null;
     this.loadStyles();
-    this.autoScroll = true; // Nouvelle propriété pour suivre l'état du scroll
+    this.autoScroll = true;
+    
+  }
+
+  connectedCallback() {
+    const apiUrl = this.getAttribute('api-url');
+    const apiKey = this.getAttribute('api-key');
+    const model = this.getAttribute('model') || 'gemma:2b';
+    this.environment = this.getAttribute('environment') as EnvType;
+    
+    if (apiUrl && apiKey) {
+      this.apiHandler = new ApiHandler({
+        baseUrl: apiUrl,
+        apiKey: apiKey,
+        model: model, 
+        environment: this.environment
+      });
+    } else {
+      console.error('API configuration missing');
+    }
   }
 
   async loadStyles() {
-    const styleElement = document.createElement('style');
-    styleElement.textContent = `
-      .messenger-ai-container {
-          width: 100%;
-          max-width: 750px;  /* Réduit de 1000px à 750px */
-          margin: 0 auto;
-          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          transform: scale(1.1);
+    try {
+      const response = await fetch('/chat-prompt.css');
+      if (!response.ok) {
+        throw new Error(`Failed to load CSS: ${response.statusText}`);
       }
-
-      .messenger-ai-window {
-          background: white;
-          border: 1px solid #0055A5;
-          border-radius: 8px;
-          box-shadow: 2px 2px 15px rgba(0,0,0,0.2);
-          overflow: hidden;
-          min-width: 675px;  /* Réduit de 900px à 675px */
+      const cssText = await response.text();
+      
+      const styleElement = document.createElement('style');
+      styleElement.textContent = cssText;
+      
+     
+      if (this.shadowRoot?.firstChild) {
+        this.shadowRoot.insertBefore(styleElement, this.shadowRoot.firstChild);
+      } else {
+        this.shadowRoot?.appendChild(styleElement);
       }
-
-      .messenger-ai-titlebar {
-          background: linear-gradient(to right, #0055A5, #00A4E8);
-          color: white;
-          padding: 5px 10px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 14px;
-      }
-
-      .messenger-ai-controls {
-          display: flex;
-          gap: 2px;
-          margin-left: 8px;
-      }
-
-      .messenger-ai-controls span {
-          cursor: pointer;
-          padding: 2px 8px;
-          border-radius: 2px;
-          font-family: "Segoe UI", sans-serif;
-          font-size: 12px;
-          transition: background-color 0.2s;
-          user-select: none;
-      }
-
-      .messenger-ai-controls span:hover {
-          background: rgba(255, 255, 255, 0.2);
-      }
-
-      .messenger-ai-controls .minimize {
-          font-size: 11px;
-          padding-top: 4px;
-      }
-
-      .messenger-ai-controls .maximize {
-          font-size: 12px;
-          padding-top: 3px;
-      }
-
-      .messenger-ai-controls .close {
-          margin-left: 2px;
-      }
-
-      .messenger-ai-chat-area {
-          height: 450px;  /* Réduit de 600px à 450px */
-          overflow-y: auto;
-          padding: 20px;
-          background: #DAE7F5;  /* Couleur de fond messenger-ai classique */
-          background-image: 
-              url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200' opacity='0.05'%3E%3Cpath fill='%230055A5' d='M100.2 38c-17 0-31.5 10.7-37.1 25.8-5.5-4.3-12.5-6.9-20.1-6.9-18 0-32.6 14.6-32.6 32.6s14.6 32.6 32.6 32.6c7.6 0 14.6-2.6 20.1-6.9 5.6 15.1 20.1 25.8 37.1 25.8 17 0 31.5-10.7 37.1-25.8 5.5 4.3 12.5 6.9 20.1 6.9 18 0 32.6-14.6 32.6-32.6s-14.6-32.6-32.6-32.6c-7.6 0-14.6 2.6-20.1 6.9-5.6-15.1-20.1-25.8-37.1-25.8z'/%3E%3C/svg%3E"),
-              linear-gradient(to bottom, #E8F1FA 0%, #DAE7F5 100%);
-          background-size: 120px 120px, 100% 100%;
-          background-position: center;
-          background-repeat: no-repeat, repeat;
-      }
-
-      .messenger-ai-chat-area::-webkit-scrollbar {
-          width: 18px;
-          background: #E3EFF9;
-          border-left: 1px solid #B8D6E6;
-      }
-
-      .messenger-ai-chat-area::-webkit-scrollbar-thumb {
-          background: linear-gradient(to right, #00A4E8, #0078D4);
-          border: 4px solid #E3EFF9;
-          border-radius: 9px;
-          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3);
-      }
-
-      .messenger-ai-chat-area::-webkit-scrollbar-thumb:hover {
-          background: linear-gradient(to right, #0091CF, #0067B5);
-      }
-
-      .messenger-ai-chat-area::-webkit-scrollbar-track {
-          background: linear-gradient(to right, #E3EFF9 0%, #F0F7FC 100%);
-      }
-
-      .message-container {
-          margin: 16px 0;
-          display: flex;
-          flex-direction: column;
-          max-width: 90%;
-          animation: messageSlideIn 0.3s ease-out;
-          opacity: 0;
-          transform: translateY(20px);
-          animation-fill-mode: forwards;
-      }
-
-      @keyframes messageSlideIn {
-          from {
-              opacity: 0;
-              transform: translateY(20px);
-          }
-          to {
-              opacity: 1;
-              transform: translateY(0);
-          }
-      }
-
-      .message-metadata {
-          font-size: 11px;
-          margin-bottom: 4px;
-          color: #666;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          position: relative;
-          padding-left: 24px;
-      }
-
-      .message-metadata::before {
-          content: '';
-          position: absolute;
-          left: 0;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 16px;
-          height: 16px;
-          background-size: contain;
-          background-repeat: no-repeat;
-      }
-
-      .user-message-container .message-metadata::before {
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%230078D4' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/%3E%3C/svg%3E");
-      }
-
-      .ai-message-container .message-metadata::before {
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2334A853' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z'/%3E%3C/svg%3E");
-      }
-
-      .user-message-container .message-sender {
-          color: #0078D4;
-      }
-
-      .ai-message-container .message-sender {
-          color: #34A853;
-      }
-
-      .message-sender {
-          font-weight: bold;
-          color: #0055A5;
-      }
-
-      .message-time {
-          color: #888;
-      }
-
-      .user-message-container {
-          align-self: flex-end;
-          align-items: flex-end;
-          animation-name: messageSlideInRight;
-      }
-
-      .ai-message-container {
-          align-self: flex-start;
-          align-items: flex-start;
-          animation-name: messageSlideInLeft;
-      }
-
-      @keyframes messageSlideInRight {
-          from {
-              opacity: 0;
-              transform: translateX(50px);
-          }
-          to {
-              opacity: 1;
-              transform: translateX(0);
-          }
-      }
-
-      @keyframes messageSlideInLeft {
-          from {
-              opacity: 0;
-              transform: translateX(-50px);
-          }
-          to {
-              opacity: 1;
-              transform: translateX(0);
-          }
-      }
-
-      .message {
-          margin: 0;
-          padding: 10px 14px;
-          border-radius: 12px;
-          position: relative;
-          font-size: 15px;
-          line-height: 1.4;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-          background: white;
-          border: 1px solid #B8D6E6;
-      }
-
-      @keyframes messageFadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-      }
-
-      .user-message-container .message {
-          background:rgb(174, 211, 248);
-          border: 1px solid #90CAF9;
-          border-top-right-radius: 4px;
-      }
-
-      .ai-message-container .message {
-          background: white;
-          border: 1px solid #B8D6E6;
-          border-top-left-radius: 4px;
-      }
-
-      .messenger-ai-input-area {
-          padding: 10px;
-          background: #F0F7FC;
-          border-top: 1px solid #B8D6E6;
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-      }
-
-      textarea {
-          width: calc(100% - 2px);
-          height: 75px;  /* Réduit de 100px à 75px */
-          padding: 8px;
-          border: 1px solid #B8D6E6;
-          border-radius: 4px;
-          resize: none;
-          font-family: inherit;
-          font-size: 15px;
-          margin-bottom: 8px;
-          box-sizing: border-box;
-          outline: none;
-          background: white;
-          color: rgb(24, 24, 24);
-          font-weight: normal;
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-      }
-
-      textarea:focus {
-          border-color: #00A4E8;
-          box-shadow: 0 0 5px rgba(0,164,232,0.3);
-          background: white;
-      }
-
-      button {
-          background: linear-gradient(to bottom, #00A4E8, #0055A5);
-          color: white;
-          border: 1px solid #0055A5;
-          border-radius: 3px;
-          padding: 8px 25px;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: bold;
-          align-self: flex-end;
-          min-width: 90px;  /* Réduit de 120px à 90px */
-      }
-
-      button:hover {
-          background: linear-gradient(to bottom, #0055A5, #00A4E8);
-      }
-
-      button:disabled {
-        background: linear-gradient(to bottom, #93c9e5, #6896b5);
-        border-color: #6896b5;
-        cursor: not-allowed;
-        opacity: 0.7;
-      }
-
-      button.cancel {
-          background: linear-gradient(to bottom, #ff4d4d, #cc0000);
-          border-color: #cc0000;
-      }
-
-      button.cancel:hover {
-          background: linear-gradient(to bottom, #cc0000, #ff4d4d);
-      }
-
-      .message.user-message {
-        margin-left: auto;
-        background: rgb(254, 244, 229);
-        border-color: #90CAF9;
-      }
-
-      .message.user-message::before {
-          right: 8px;
-          background: #E3F2FD;
-          color: #1565C0;
-      }
-
-      .message.ai-message {
-        margin-right: auto;
-        background: rgb(202, 224, 255);
-      }
-
-      .message.ai-message::before {
-          left: 8px;
-          background: #E8F5FF;
-          color: #00498F;
-      }
-
-      .loading {
-        margin-right: auto;
-        padding: 8px 16px;
-      }
-
-      .loading .dot {
-        animation: loadingDots 1.5s infinite;
-        opacity: 0;
-      }
-
-      .loading .dot:nth-child(2) { animation-delay: 0.5s; }
-      .loading .dot:nth-child(3) { animation-delay: 1s; }
-
-      @keyframes loadingDots {
-        0% { opacity: 0; }
-        50% { opacity: 1; }
-        100% { opacity: 0; }
-      }
-    `;
+    } catch (error) {
+      console.error('Error loading CSS, falling back to default styles:', error);
+      this.loadFallbackStyles();
+    }
     
-    this.shadowRoot?.insertBefore(styleElement, this.shadowRoot.firstChild);
+   
     this.initializeComponent();
   }
 
@@ -419,10 +129,10 @@ class MessengerAIChatCompenent extends HTMLElement {
 
   private async handleSend(): Promise<void> {
     if (this.isResponding) {
-      // Annulation de la réponse en cours
+
       this.abortController?.abort();
       this.isResponding = false;
-      this.sendBtn.textContent = 'Envoyer';
+      this.sendBtn.textContent = 'Send';
       this.sendBtn.classList.remove('cancel');
       this.input.disabled = false;
       return;
@@ -431,22 +141,19 @@ class MessengerAIChatCompenent extends HTMLElement {
     const promptText = this.input.value.trim();
     if (promptText === '') return;
     
-    // Préparation pour l'envoi
-    this.sendBtn.textContent = 'Annuler';
+    this.sendBtn.textContent = 'Stop';
     this.sendBtn.classList.add('cancel');
     this.input.disabled = true;
     
-    // Ajouter le message de l'utilisateur
     this.ajouterMessage(promptText, 'user-message');
     this.input.value = '';
     
-    // Simuler la réponse avec possibilité d'annulation
     this.isResponding = true;
     this.abortController = new AbortController();
-    this.montrerIndicateurChargement();
+    this.showLoading();
     
     try {
-      await this.simulerReponse(promptText, this.abortController.signal);
+      await this.buildResponse(promptText, this.abortController.signal);
     } catch (error: any) {
       if (error.name === 'AbortError') {
         const loadingElem = this.shadowRoot?.querySelector('.loading');
@@ -454,14 +161,19 @@ class MessengerAIChatCompenent extends HTMLElement {
         this.ajouterMessage('Message interrompu', 'ai-message');
       }
     } finally {
-      // Réinitialisation de l'interface
+    
       this.isResponding = false;
       this.abortController = null;
-      this.sendBtn.textContent = 'Envoyer';
+      this.sendBtn.textContent = 'Send';
       this.sendBtn.classList.remove('cancel');
       this.input.disabled = false;
       this.input.focus();
     }
+  }
+
+  private getFormattedTime(): string {
+    const now = new Date();
+    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
   }
 
   private ajouterMessage(message: string, type: string = ''): void {
@@ -473,12 +185,11 @@ class MessengerAIChatCompenent extends HTMLElement {
     
     const senderElem = document.createElement('span');
     senderElem.className = 'message-sender';
-    senderElem.textContent = type === 'user-message' ? 'VOUS' : 'IA';
+    senderElem.textContent = type === 'user-message' ? 'VOUS' : 'AI';
     
     const timeElem = document.createElement('span');
     timeElem.className = 'message-time';
-    const now = new Date();
-    timeElem.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    timeElem.textContent = this.getFormattedTime();
 
     metadataElem.appendChild(senderElem);
     metadataElem.appendChild(timeElem);
@@ -491,10 +202,10 @@ class MessengerAIChatCompenent extends HTMLElement {
     containerElem.appendChild(messageElem);
     this.display.appendChild(containerElem);
     this.display.scrollTop = this.display.scrollHeight;
-    this.autoScroll = true; // Réinitialiser l'auto-scroll pour les nouveaux messages
+    this.autoScroll = true;
   }
 
-  private montrerIndicateurChargement(): void {
+  private showLoading(): void {
     const loadingElem = document.createElement('div');
     loadingElem.className = 'message loading';
     loadingElem.innerHTML = '<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>';
@@ -502,74 +213,125 @@ class MessengerAIChatCompenent extends HTMLElement {
     this.display.scrollTop = this.display.scrollHeight;
   }
 
-  private async simulerReponse(prompt: string, signal: AbortSignal): Promise<void> {
+  private async buildResponse(prompt: string, signal: AbortSignal): Promise<void> {
     const loading = this.shadowRoot?.querySelector('.loading');
     if (loading) loading.remove();
 
-    const reponse = this.genererReponseSimulee(prompt);
-    
-    // Créer le conteneur de message avec métadonnées
+    if (!this.apiHandler) {
+      console.error('API handler not initialized');
+      return;
+    }
+
+  
     const containerElem = document.createElement('div');
     containerElem.className = 'message-container ai-message-container';
 
-    // Ajouter les métadonnées (sender + time)
     const metadataElem = document.createElement('div');
     metadataElem.className = 'message-metadata';
     
     const senderElem = document.createElement('span');
     senderElem.className = 'message-sender';
-    senderElem.textContent = 'IA';
+    senderElem.textContent = 'AI';
     
     const timeElem = document.createElement('span');
     timeElem.className = 'message-time';
-    const now = new Date();
-    timeElem.textContent = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    timeElem.textContent = this.getFormattedTime();
 
     metadataElem.appendChild(senderElem);
     metadataElem.appendChild(timeElem);
     containerElem.appendChild(metadataElem);
 
-    // Ajouter le message
     const messageElem = document.createElement('div');
     messageElem.className = 'message ai-message';
     containerElem.appendChild(messageElem);
 
-    // Ajouter le conteneur au chat
     this.display.appendChild(containerElem);
 
-    // Ajouter les gestionnaires d'événements pour le scroll
-    const handleScroll = () => {
-      const {scrollTop, scrollHeight, clientHeight} = this.display;
-      // Désactiver l'auto-scroll si l'utilisateur remonte manuellement
-      this.autoScroll = scrollHeight - scrollTop - clientHeight < 50;
-    };
+    try {
+      const stream = (this.environment === 'development') ? this.generateDemoReponse(prompt) : await this.apiHandler.generateResponse({
+        prompt: prompt,
+        maxTokens: 2000,
+        temperature: 0.7
+      }) as any;
 
-    this.display.addEventListener('scroll', handleScroll);
-
-    // Streaming simulé avec scroll intelligent
-    for (let i = 0; i < reponse.length; i++) {
-      if (signal.aborted) {
-        this.display.removeEventListener('scroll', handleScroll);
-        throw new DOMException('Réponse annulée', 'AbortError');
-      }
-      messageElem.textContent += reponse[i];
-      
-      // Scroll uniquement si l'auto-scroll est actif
-      if (this.autoScroll) {
-        this.display.scrollTo({
-          top: this.display.scrollHeight,
-          behavior: 'smooth'
-        });
+      if (!stream) {
+        throw new Error('Stream is null');
       }
       
-      await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 20));
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
+      let accumulatedText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || signal.aborted) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed && typeof parsed.content === 'string') {
+
+                accumulatedText += parsed.content;
+                
+                const formattedText = this.formatText(accumulatedText);
+                messageElem.innerHTML = formattedText;
+
+                if (this.autoScroll) {
+                  this.display.scrollTo({
+                    top: this.display.scrollHeight,
+                    behavior: 'smooth'
+                  });
+                }
+              }
+            } catch (e) {
+              console.error('Parse error:', e);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Stream error:', error);
+      messageElem.textContent = `Erreur API: ${error.message}`;
     }
-
-    // Nettoyage
-    this.display.removeEventListener('scroll', handleScroll);
   }
 
-  private genererReponseSimulee(prompt: string): string {
+  private formatText(text: string): string {
+
+    let formatted = text.replace(/\n/g, '<br>');
+    
+    formatted = formatted.replace(/([.,!?])/g, '$1 ');
+    
+    formatted = formatted.replace(/^[-•]\s*(.*?)$/gm, '<br>• $1');
+    
+    formatted = formatted.replace(/(\d+\.\s+[^\n]+)/g, '<strong>$1</strong>');
+    
+    return formatted;
+  }
+
+  private generateDemoReponse(prompt: string): string {
+    if (["Bonjour", "Hi", "Hello", "Dear"].map(el =>el.toLocaleLowerCase())
+      .includes(prompt.toLowerCase())) {
+      return `Hello! 👋 
+
+I'm your AI chat assistant. How can I help you today?
+
+You can ask me any questions or just chat with me. I'm here to:
+
+- Help you find information
+- Answer your questions
+- Have engaging conversations
+- Assist with various topics
+
+What would you like to discuss?`;
+    }
+
     const reponses = [`In response to your question "${prompt}", let me develop a comprehensive analysis.
 
 

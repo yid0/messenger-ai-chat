@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 *-lock.json
+wr*.toml
+public/*.svg
