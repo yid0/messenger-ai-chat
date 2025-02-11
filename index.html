@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Messenger AI Chat</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="./main.css" rel="stylesheet">
+    <link href="./chat-prompt.css" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(180deg, 
+                #E8F5FD 0%,
+                #D4E9F7 20%,
+                #B8DDFF 40%,
+                #A5D1FF 60%,
+                #97C7F7 80%,
+                #89BDF0 100%
+            );
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        chat-prompt {
+            animation: fadeIn 0.5s ease-in-out;
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.15));
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body >
+    <div id="app">
+        <messenger-ai-chat></messenger-ai-chat>
+    </div>
+   
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="module" src="src/chat-prompt.ts"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #00A4E8 0%, #0055A5 100%);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+chat-prompt {
+    animation: fadeIn 0.5s ease-in-out;
+    filter: drop-shadow(0 10px 20px rgba(0,0,0,0.15));
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
