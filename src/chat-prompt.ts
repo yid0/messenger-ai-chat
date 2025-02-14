@@ -185,7 +185,7 @@ class MessengerAIChatCompenent extends HTMLElement {
     
     const senderElem = document.createElement('span');
     senderElem.className = 'message-sender';
-    senderElem.textContent = type === 'user-message' ? 'VOUS' : 'AI';
+    senderElem.textContent = type === 'user-message' ? 'You' : 'AI';
     
     const timeElem = document.createElement('span');
     timeElem.className = 'message-time';
@@ -222,7 +222,6 @@ class MessengerAIChatCompenent extends HTMLElement {
       return;
     }
 
-  
     const containerElem = document.createElement('div');
     containerElem.className = 'message-container ai-message-container';
 
@@ -248,53 +247,63 @@ class MessengerAIChatCompenent extends HTMLElement {
     this.display.appendChild(containerElem);
 
     try {
-      const stream = (this.environment === 'development') ? this.generateDemoReponse(prompt) : await this.apiHandler.generateResponse({
-        prompt: prompt,
-        maxTokens: 2000,
-        temperature: 0.7
-      }) as any;
+      const response = (this.environment === 'development') 
+        ? this.generateDemoReponse(prompt) 
+        : await this.apiHandler.generateResponse({
+            prompt: prompt,
+            maxTokens: 2000,
+            temperature: 0.7
+          }) as ReadableStream | string | { content: string };
 
-      if (!stream) {
-        throw new Error('Stream is null');
+      if (!response) {
+        throw new Error('Response is null');
       }
-      
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
 
-      let accumulatedText = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done || signal.aborted) break;
+      // Handle different response types
+      if (response instanceof ReadableStream) {
+        const reader = response.getReader();
+        const decoder = new TextDecoder();
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        let accumulatedText = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || signal.aborted) break;
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
 
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed && typeof parsed.content === 'string') {
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
 
-                accumulatedText += parsed.content;
-                
-                const formattedText = this.formatText(accumulatedText);
-                messageElem.innerHTML = formattedText;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed.content === 'string') {
+                  accumulatedText += parsed.content;
+                  messageElem.innerHTML = this.formatText(accumulatedText);
 
-                if (this.autoScroll) {
-                  this.display.scrollTo({
-                    top: this.display.scrollHeight,
-                    behavior: 'smooth'
-                  });
+                  if (this.autoScroll) {
+                    this.display.scrollTo({
+                      top: this.display.scrollHeight,
+                      behavior: 'smooth'
+                    });
+                  }
                 }
+              } catch (e) {
+                console.error('Parse error:', e);
               }
-            } catch (e) {
-              console.error('Parse error:', e);
             }
           }
         }
+      } else if (typeof response === 'string') {
+        // Handle plain text response
+        messageElem.innerHTML = this.formatText(response);
+      } else if (response.content) {
+        // Handle JSON response with content field
+        messageElem.innerHTML = this.formatText(response.content);
+      } else {
+        throw new Error('Unexpected response format');
       }
     } catch (error: any) {
       console.error('Stream error:', error);
@@ -303,13 +312,21 @@ class MessengerAIChatCompenent extends HTMLElement {
   }
 
   private formatText(text: string): string {
-
     let formatted = text.replace(/\n/g, '<br>');
     
+    // Format **text** to bold
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Format *text* to italic
+    formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    
+    // Format punctuation
     formatted = formatted.replace(/([.,!?])/g, '$1 ');
     
+    // Format bullet points
     formatted = formatted.replace(/^[-•]\s*(.*?)$/gm, '<br>• $1');
     
+    // Format numbered lists
     formatted = formatted.replace(/(\d+\.\s+[^\n]+)/g, '<strong>$1</strong>');
     
     return formatted;
